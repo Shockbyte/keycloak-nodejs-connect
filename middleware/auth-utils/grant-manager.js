@@ -142,7 +142,10 @@ GrantManager.prototype.checkPermissions = function obtainPermissions (authzReque
       if (request.kauth && request.kauth.grant && request.kauth.grant.access_token) {
         bearerToken = request.kauth.grant.access_token.token;
       } else {
-        return Promise.reject(new Error('No bearer in header'));
+        bearerToken = this.checkForBearerCookie(request);
+        if (!bearerToken) {
+          return Promise.reject(new Error('No bearer in header or cookie'));
+        }
       }
     }
 
@@ -193,6 +196,24 @@ GrantManager.prototype.checkPermissions = function obtainPermissions (authzReque
   };
 
   return nodeify(fetch(this, handler, options, params));
+};
+
+GrantManager.prototype.checkForBearerCookie = function checkForBearerCookie (request) {
+  if (!request.cookies) return false;
+  for (const cookie of Object.keys(request.cookies)) {
+    const token = request.cookies[cookie];
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(Buffer.from(base64, 'base64').toString().split('').map(function (c) {
+      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+
+    const jwt = JSON.parse(jsonPayload);
+    if (jwt.typ === 'Bearer' && jwt.iss === this.realmUrl && jwt.azp === this.clientId) {
+      return token;
+    }
+  }
+  return false;
 };
 
 /**
